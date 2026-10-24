@@ -2,6 +2,9 @@ import configs from './configs';
 import {bindAll} from './helpers/helpers';
 import {Evented, Marker} from 'mapbox-gl';
 
+// Movement tolerance in pixels to distinguish a tap from a drag starting on the marker
+const TAP_MOVE_TOLERANCE = 10;
+
 /**
  * Creates a marker component.
  */
@@ -25,7 +28,10 @@ export default class extends Evented {
         me._minZoom = options.minZoom || 0;
         me._visible = false;
         me._added = false;
-        bindAll(['_onClick', '_onMouseEnter', '_onMouseLeave', '_onZoom'], me);
+        bindAll([
+            '_onClick', '_onMouseEnter', '_onMouseLeave', '_onMouseOut', '_onZoom',
+            '_onTouchStart', '_onTouchEnd'
+        ], me);
     }
 
     /**
@@ -52,6 +58,10 @@ export default class extends Evented {
             element.addEventListener('mouseenter', me._onMouseEnter);
             element.addEventListener('mouseleave', me._onMouseLeave);
             element.addEventListener('mousemove', me._onMouseMove);
+            // iOS Safari can withhold 'click' near screen edges; recover it via mouseout/touchend below.
+            element.addEventListener('mouseout', me._onMouseOut);
+            element.addEventListener('touchstart', me._onTouchStart);
+            element.addEventListener('touchend', me._onTouchEnd);
             // Commit the hidden start state so the fade-in transition runs.
             element.getBoundingClientRect();
         }
@@ -83,6 +93,9 @@ export default class extends Evented {
             element.removeEventListener('mouseenter', me._onMouseEnter);
             element.removeEventListener('mouseleave', me._onMouseLeave);
             element.removeEventListener('mousemove', me._onMouseMove);
+            element.removeEventListener('mouseout', me._onMouseOut);
+            element.removeEventListener('touchstart', me._onTouchStart);
+            element.removeEventListener('touchend', me._onTouchEnd);
             me._map.off('zoom', me._onZoom);
             me._marker.remove();
             me._added = false;
@@ -159,22 +172,71 @@ export default class extends Evented {
     }
 
     _onClick(event) {
+        this._pendingTapPoint = undefined;
         this.fire({type: 'click'});
         event.stopPropagation();
     }
 
     _onMouseEnter() {
-        this._hover = true;
-        this.fire({type: 'mouseenter'});
+        const me = this,
+            map = me._map,
+            prev = map._hoveredMarker;
+
+        if (prev === me) {
+            return;
+        }
+        if (prev) {
+            prev._onMouseLeave();
+        }
+        map._hoveredMarker = me;
+        me._hover = true;
+        me.fire({type: 'mouseenter'});
     }
 
     _onMouseLeave() {
-        delete this._hover;
-        this.fire({type: 'mouseleave'});
+        const me = this,
+            map = me._map;
+
+        if (map._hoveredMarker === me) {
+            delete map._hoveredMarker;
+        }
+        delete me._hover;
+        me.fire({type: 'mouseleave'});
     }
 
     _onMouseMove(event) {
         event.stopPropagation();
+    }
+
+    _onMouseOut(event) {
+        const me = this,
+            pending = me._pendingTapPoint;
+
+        me._pendingTapPoint = undefined;
+        // Ignore mouseout bubbling up from a child element rather than the marker itself
+        if (pending && event.target === event.currentTarget &&
+            Math.hypot(event.clientX - pending[0], event.clientY - pending[1]) <= TAP_MOVE_TOLERANCE) {
+            me._onMouseEnter();
+            me._onClick(event);
+        }
+    }
+
+    _onTouchStart(event) {
+        const touches = event.touches;
+
+        this._touchStartPoint = touches.length === 1 ? [touches[0].clientX, touches[0].clientY] : undefined;
+    }
+
+    _onTouchEnd(event) {
+        event.stopPropagation();
+
+        const touches = event.changedTouches,
+            start = this._touchStartPoint;
+
+        this._touchStartPoint = undefined;
+        this._pendingTapPoint = start && touches.length === 1 &&
+            Math.hypot(touches[0].clientX - start[0], touches[0].clientY - start[1]) <= TAP_MOVE_TOLERANCE ?
+            [touches[0].clientX, touches[0].clientY] : undefined;
     }
 
     _onZoom() {

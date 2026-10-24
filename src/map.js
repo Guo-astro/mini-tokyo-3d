@@ -1198,60 +1198,43 @@ export default class extends Evented {
             map.addControl(notificationCtrl);
         }
 
-        // Near a screen edge, iOS Safari sometimes withholds the synthetic
-        // 'click' it would otherwise dispatch after a tap and fires
-        // 'mouseout' instead, even though the underlying touchstart/touchend
-        // were delivered normally - closing the hover popup opened by the
-        // 'mousemove' right before it, with no selection or camera pan ever
-        // happening. Handling the tap directly from 'touchend' (reliable in
-        // every observed case) and suppressing the subsequent ghost
-        // mousemove/mouseout/click avoids depending on that unreliable
-        // 'click' dispatch.
+        // iOS Safari can withhold 'click' near screen edges and fire 'mouseout' at
+        // the same point instead; fire 'click' ourselves in that case, but only for
+        // a mouseout targeting the canvas itself - one bubbling up from a child
+        // element (e.g. a marker losing hover) is unrelated and still gets a real
+        // 'click' afterward.
         const TAP_MOVE_TOLERANCE = 10;
-        const TAP_SUPPRESS_DURATION = 400;
-        let tapStartPoint, tapSuppressUntil = 0;
+        let tapStartPoint, pendingTapPoint;
 
         map.on('touchstart', e => {
             tapStartPoint = e.originalEvent.touches.length === 1 ? e.point : undefined;
         });
 
-        map.on('touchmove', e => {
-            if (tapStartPoint && e.point.dist(tapStartPoint) > TAP_MOVE_TOLERANCE) {
-                tapStartPoint = undefined;
-            }
-        });
-
         map.on('touchend', e => {
-            if (tapStartPoint) {
-                const object = me.pickObject(e.point);
-
-                me.markObject(object);
-                me.trackObject(object);
-                tapSuppressUntil = performance.now() + TAP_SUPPRESS_DURATION;
-                tapStartPoint = undefined;
-            }
+            pendingTapPoint = tapStartPoint && e.point.dist(tapStartPoint) <= TAP_MOVE_TOLERANCE ? e.point : undefined;
+            tapStartPoint = undefined;
         });
 
         map.on('mousemove', e => {
-            if (performance.now() < tapSuppressUntil) {
-                return;
-            }
             me.markObject(me.pickObject(e.point));
         });
 
-        map.on('mouseout', () => {
-            if (performance.now() < tapSuppressUntil) {
-                return;
+        map.on('mouseout', e => {
+            const oe = e.originalEvent;
+
+            if (pendingTapPoint && oe.target === map.getCanvas() &&
+                e.point.dist(pendingTapPoint) <= TAP_MOVE_TOLERANCE) {
+                map.fire('click', {point: e.point, lngLat: e.lngLat, originalEvent: oe});
+            } else {
+                me.markObject();
             }
-            me.markObject();
+            pendingTapPoint = undefined;
         });
 
         map.on('click', e => {
-            if (performance.now() < tapSuppressUntil) {
-                return;
-            }
-
             const object = me.pickObject(e.point);
+
+            pendingTapPoint = undefined;
 
             me.markObject(object);
             me.trackObject(object);
