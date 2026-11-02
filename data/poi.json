@@ -2966,6 +2966,12 @@
 		"zh-Hans": "出口A2",
 		"zh-Hant": "出口A2"
 	},
+	"uptime": [
+		{
+			"open": "00:00",
+			"close": "00:00"
+		}
+	],
 	"facilities": [
 		"stairs"
 	]
@@ -21797,12 +21803,6 @@
 		"zh-Hans": "出口A2",
 		"zh-Hant": "出口A2"
 	},
-	"uptime": [
-		{
-			"open": "00:00",
-			"close": "00:00"
-		}
-	],
 	"facilities": [
 		"stairs"
 	]
